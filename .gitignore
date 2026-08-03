@@ -1,0 +1,8 @@
+# Nunca. Las keys viven en ~/.claude/.env.broll, fuera de este repo.
+.env
+.env.*
+*.key
+*.token
+
+node_modules/
+package-lock.json

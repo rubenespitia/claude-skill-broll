@@ -1,0 +1,77 @@
+BROLL - <titulo de la pieza>
+Recopilado: YYYY-MM-DD
+Guion: <ruta del guion>
+Carpeta: <CARPETA_VIDEO>\VID_YYYY_MM_DD-titulo\B-roll\
+
+================================================================
+BLOQUE PARA LA DESCRIPCION DE YOUTUBE
+================================================================
+
+Creditos del material utilizado:
+
+- Analisis de <autor>, IGN España (2025-09-04) - https://...
+- Gameplay de <canal> (CC BY) - https://...
+- Precios: Steam, region Colombia, consultados el 2026-08-03
+
+================================================================
+DETALLE POR ARCHIVO
+================================================================
+
+[B01] imagenes/prensa/B01_ign-analisis.png
+  Tipo        : Imagen - prensa
+  Fuente      : IGN España
+  Autor       : <firma>
+  Publicado   : 2025-09-04
+  URL         : https://...
+  Licencia    : Cita con atribucion (captura de articulo)
+  Atribucion  : obligatoria
+  Credito     : Analisis de <autor>, IGN España (2025-09-04)
+  Descargado  : 2026-08-03
+  Uso         : seccion 2, frase "la critica coincidio en..."
+
+[B04] imagenes/precios/B04_steam-co.png
+  Tipo        : Imagen - precio
+  Fuente      : Steam
+  Autor       : -
+  Precio      : COL$ 47.500 (COP) - sin descuento
+  Region      : Colombia (cc=co)
+  Consultado  : 2026-08-03
+  URL         : https://store.steampowered.com/app/...
+  Licencia    : Captura de tienda
+  Atribucion  : obligatoria (tienda + region + fecha)
+  Credito     : Precio en Steam Colombia, 3 de agosto de 2026
+  Uso         : seccion 4, comparativa de precio
+
+[B09] videos/gameplay-propio/B09_gameplay-jefe.mp4
+  Tipo        : Video - gameplay propio
+  Fuente      : Canal @WantedGull
+  Autor       : Ruben
+  Origen      : VID_2026_03_11 / grabacion.mp4
+  Tramo       : 00:12:30 - 00:13:10
+  VOD publico : https://youtube.com/watch?v=...
+  Codec       : h264 1920x1080
+  Licencia    : Propio
+  Atribucion  : no aplica
+  Uso         : seccion 3, mientras se habla de la dificultad
+
+[B12] videos/trailers/B12_trailer-lanzamiento.mp4
+  Tipo        : Video - trailer
+  Fuente      : Steam (hls_h264)
+  Autor       : <publisher>
+  Publicado   : 2025-08-21
+  Duracion    : 2:14
+  URL         : https://store.steampowered.com/app/...
+  Codec       : h264 1920x1080 + aac
+  Licencia    : Material promocional oficial
+  Atribucion  : recomendada
+  Credito     : Trailer oficial - <publisher>
+  Descargado  : 2026-08-03
+  Uso         : seccion 1, cobertura del hook
+
+================================================================
+NOTAS
+================================================================
+
+- Los precios caducan. Reconsultar si el video se publica mas de dos semanas despues de
+  la fecha de consulta.
+- Recursos descartados y huecos sin cubrir: ver candidatos.md
