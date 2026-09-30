@@ -239,33 +239,52 @@ sobra antes de su punto de entrada y media despues de su salida.
 **El tipo se cicla corte a corte** con `TRANSICION_CICLO`, una lista de nombres. Con un solo
 elemento salen todas iguales; con dos, alternan una y una.
 
-### El tipo y la direccion si se pueden fijar
+### El tipo NO se puede fijar. Solo hay dos resultados
 
-**[verificado 2026-09-30]** Un `<transition>` pelado entra como Cross Dissolve pase lo que pase
-en su `name`. Faltan dos cosas, y hacen falta las dos:
+**[verificado 2026-09-30]** Resolve ignora el `name` del `<transition>` al importar. Lo unico
+que cambia el resultado es si el elemento lleva o no un hijo `<filter-video>`:
+
+| Lo que emites | Lo que monta Resolve |
+|---|---|
+| `<transition name="X" offset duration/>` sin hijos | **Cross Dissolve** |
+| `<transition name="X">` con `<filter-video ref="e1" name="Y"/>` | **Edge Wipe** |
+
+Probado con `name` a `Slide`, `Push`, `Slide, Left-Right`, `Push Right`, `Edge Wipe`, `Wipe` y
+`Cross Dissolve`, y replicando la estructura exacta que Resolve escribe al **exportar**, `uid`
+incluido:
 
 ```xml
-<effect id="e1" name="Cross Dissolve" uid="FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"/>
-...
-<transition name="Slide" offset="..." duration="...">
-  <filter-video ref="e1" name="Slide, Left-Right"/>
+<effect id="r3" name="Cross Dissolve" uid="FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"/>
+<transition offset="..." name="Slide" duration="...">
+  <filter-video ref="r3" name="Slide, Left-Right"/>
 </transition>
 ```
 
-- el **tipo** va en el `name` del `<transition>`: `Slide`, `Push`, `Cross Dissolve`
-- la **direccion** va en el `name` del `<filter-video>`, que es el nombre del preset tal y como
-  aparece en el Inspector: `Slide, Left-Right`
-- el `<effect>` es uno solo para todas, con ese `uid`. Sirva el tipo que sirva
+Ni asi. Resolve **exporta** el tipo pero no lo **importa**: el viaje de ida y vuelta no lo
+conserva.
 
-El `uid` no hay que inventarlo: **se saca exportando desde Resolve**. Poner una transicion a
-mano, `File > Export > Final Cut Pro XML`, y leer lo que escribe. Ese fue el unico camino que
-resolvio esto despues de dos rondas de adivinar nombres.
+Por eso el generador emite el `<transition>` pelado y `TRANSICION_CICLO` va con `preset=None`.
+Cross Dissolve es neutro; Edge Wipe no, y es lo que sale en cuanto asomas un `<filter-video>`.
 
-La colocacion que escribe Resolve coincide con la de aqui: centrada en el corte y con los
-offsets de los clips contiguos.
+Lo que si viaja: la **duracion** y la **alineacion** respecto al corte.
 
-`TRANSICION_CICLO` es una lista de pares `(tipo, preset)` que se cicla corte a corte. Para
-comprobar que reconoce un preset nuevo, sin generar noventa transiciones a ciegas:
+Lo que no viaja de ninguna manera: `Ease`, `Motion Blur`, `Transition Curve`, `Border`,
+`Angle`. No hay campo para eso.
+
+#### Si hacen falta Slide o Push
+
+Se cambian en Resolve **despues** de importar, y ahi si se puede en bloque: seleccionar varias
+transiciones con `Ctrl+clic` y tocar el Inspector una vez por grupo. Para alternar dos tipos son
+dos pasadas, no noventa ediciones.
+
+La leccion general: **que el formato lo admita y que el importador lo lea son dos cosas
+distintas.** Aqui se gastaron tres rondas en confirmarlo. Antes de construir sobre una
+capacidad, comprobarla con un archivo de seis clips.
+
+`TRANSICION_CICLO` es una lista de pares `(tipo, preset)` que se cicla corte a corte; con
+`preset=None` la transicion sale sin `<filter-video>`. Se queda por si una version futura de
+Resolve si respeta el tipo. Para volver a comprobarlo, sin generar noventa transiciones a
+ciegas:
 
 ```
 py scripts/preparar_resolve.py <carpeta> --sondeo

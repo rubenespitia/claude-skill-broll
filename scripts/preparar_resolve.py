@@ -90,14 +90,22 @@ DERIVA_PX = 160
 
 TRANSICIONES = True
 TRANSICION_S = 0.5
-# (tipo, preset) que se ciclan corte a corte. El tipo va en el `name` del
-# <transition> y el preset, que es donde vive la direccion, en el `name` del
-# <filter-video>. Los dos hacen falta: un <transition> pelado, sin hijo
-# <filter-video> ni recurso <effect>, cae a Cross Dissolve.
-# El uid es el que escribe Resolve al exportar; sirve para cualquier tipo.
+# (tipo, preset) que se ciclan corte a corte.
+#
+# [verificado 2026-09-30] Resolve NO respeta el tipo al importar FCPXML. Solo
+# hay dos resultados posibles y ninguno depende del `name`:
+#
+#   <transition> sin hijo <filter-video>  ->  Cross Dissolve
+#   <transition> con hijo <filter-video>  ->  Edge Wipe
+#
+# Probado con name="Slide", "Push", "Slide, Left-Right", "Push Right",
+# "Edge Wipe" y "Wipe", y replicando la estructura exacta que escribe Resolve
+# al exportar, uid incluido. Siempre lo mismo.
+#
+# Por eso preset va a None: Cross Dissolve es neutro y Edge Wipe no. El tipo se
+# cambia en Resolve despues de importar, y ahi si se puede en bloque.
 EFECTO_UID = "FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"
-TRANSICION_CICLO = [("Slide", "Slide, Left-Right"),
-                    ("Slide", "Slide, Right-Left")]
+TRANSICION_CICLO = [("Cross Dissolve", None)]
 
 EXT_VIDEO = (".mp4", ".mov", ".mxf", ".mkv", ".avi")
 
@@ -538,15 +546,19 @@ def construir_fcpxml(manifest, avisar=None):
             # indexar por numero de corte, no por len(elementos): esa lista
             # crece con clips Y transiciones, y el ciclo saldria desordenado
             tipo, preset = TRANSICION_CICLO[i % len(TRANSICION_CICLO)]
+            cuerpo = ("" if preset is None
+                      else '<filter-video ref="%s" name="%s"/>'
+                           % (efecto_id, attr(preset)))
             elementos.append(
-                '<transition name="%s" offset="%s" duration="%s">'
-                '<filter-video ref="%s" name="%s"/></transition>'
+                '<transition name="%s" offset="%s" duration="%s">%s</transition>'
                 % (attr(tipo), t_timeline(corte - MEDIA_TRANS),
-                   t_timeline(FRAMES_TRANS), efecto_id, attr(preset)))
+                   t_timeline(FRAMES_TRANS), cuerpo))
 
     xml = ['<?xml version="1.0" encoding="UTF-8"?>', "<!DOCTYPE fcpxml>",
            '<fcpxml version="1.9">', "<resources>"]
-    if FRAMES_TRANS:
+    # el <effect> solo si alguna transicion lo referencia; declararlo suelto
+    # no rompe nada, pero ensucia el archivo
+    if FRAMES_TRANS and any(preset is not None for _, preset in TRANSICION_CICLO):
         xml.append('<effect id="%s" name="Cross Dissolve" uid="%s"/>'
                    % (efecto_id, EFECTO_UID))
     xml += [x for _, x in formatos.values()]
@@ -610,11 +622,11 @@ def main():
 
     if "--sondeo" in sys.argv:
         global TRANSICION_CICLO
-        TRANSICION_CICLO = [("Cross Dissolve", "Cross Dissolve"),
-                            ("Slide", "Slide, Left-Right"),
-                            ("Slide", "Slide, Right-Left"),
-                            ("Push", "Push, Left-Right"),
-                            ("Push", "Push, Right-Left")]
+        TRANSICION_CICLO = [("Slide", "Slide"),
+                            ("Slide", None),
+                            ("Edge Wipe", "Edge Wipe"),
+                            ("Push", "Push"),
+                            ("Cross Dissolve", "Cross Dissolve")]
         # solo imagenes: cada una es exactamente un clip, asi cada corte se
         # queda con un nombre distinto del ciclo y el sondeo es legible
         recursos = [r for s_ in manifest["secciones"] for r in s_["recursos"]
@@ -630,7 +642,8 @@ def main():
         print("B-ROLL-SONDEO.fcpxml: %d clips, %d transiciones"
               % (st["clips"], st["transiciones"]))
         for i, (tipo, preset) in enumerate(TRANSICION_CICLO[:st["transiciones"]], 1):
-            print("  corte %d -> %s / %s" % (i, tipo, preset))
+            print("  corte %d -> transition name=%-14s filter-video=%s"
+                  % (i, tipo, preset if preset is not None else "(sin filter-video)"))
         return 0
 
     if "--prueba" in sys.argv:

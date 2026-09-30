@@ -125,13 +125,14 @@ def validar(ruta, max_img=MAX_IMG_SEGUIDAS):
         acum += seg(c.get("duration"))
     efectos = {e.get("id") for e in recursos.findall("effect")}
     for t in transiciones:
-        # un <transition> pelado, sin hijo <filter-video> apuntando a un
-        # <effect> declarado, entra en Resolve como Cross Dissolve sin avisar
+        # Resolve no respeta el tipo: con <filter-video> monta Edge Wipe y sin
+        # el, Cross Dissolve. El `name` da igual. Asi que llevarlo es pedir un
+        # Edge Wipe, se llame como se llame.
         fv = t.find("filter-video")
-        if fv is None:
-            mal("transicion sin <filter-video>: entrara como Cross Dissolve (%s)"
-                % t.get("name"))
-        elif fv.get("ref") not in efectos:
+        if fv is not None and fv.get("ref") in efectos:
+            mal("la transicion %s lleva <filter-video>: Resolve la montara como "
+                "Edge Wipe, no como lo que diga el name" % t.get("name"))
+        elif fv is not None and fv.get("ref") not in efectos:
             mal("la transicion %s apunta a un effect que no existe: %s"
                 % (t.get("name"), fv.get("ref")))
         ini, dur = seg(t.get("offset")), seg(t.get("duration"))
