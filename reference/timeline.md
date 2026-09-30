@@ -249,9 +249,27 @@ que cambia el resultado es si el elemento lleva o no un hijo `<filter-video>`:
 | `<transition name="X" offset duration/>` sin hijos | **Cross Dissolve** |
 | `<transition name="X">` con `<filter-video ref="e1" name="Y"/>` | **Edge Wipe** |
 
-Probado con `name` a `Slide`, `Push`, `Slide, Left-Right`, `Push Right`, `Edge Wipe`, `Wipe` y
-`Cross Dissolve`, y replicando la estructura exacta que Resolve escribe al **exportar**, `uid`
-incluido:
+**No depende del `name` ni del `uid`.** Probado, y todo acaba en Edge Wipe:
+
+| Variante | Resultado |
+|---|---|
+| `name` = `Slide`, `Push`, `Edge Wipe`, `Wipe`, `Cross Dissolve` | Edge Wipe |
+| `name` de preset con direccion: `Slide, Left-Right`, `Push Right` | Edge Wipe |
+| `uid` generico de Resolve, `FxPlug:4731E73A-...` | Edge Wipe |
+| `uid` real de FCP, `.../Movements.localized/Slide.localized/Slide.effectBundle` | Edge Wipe |
+| lo mismo con `.moti` en vez de `.effectBundle` | Edge Wipe |
+| `uid` inventado tipo `DaVinci:Slide` | Edge Wipe |
+| el **export del propio Resolve**, cambiando solo los nombres | Edge Wipe |
+
+Ese ultimo es el que cierra el asunto. Se cogio un FCPXML escrito por Resolve, con sus
+`ref-clip`, sus `media` compuestos y su `<param name="ease">`, y se le cambiaron solo los
+nombres de las 91 transiciones. Edge Wipe igual.
+
+La prueba de que el `uid` no codifica el tipo esta en el propio export: un timeline con Push y
+Slide puestos a mano exporta las dos **referenciando el mismo `<effect>`**, con el `uid` de
+Cross Dissolve. El tipo viaja solo en el `name`, que es texto libre, y el importador no lo mira.
+
+Estructura completa que se probo, por si sirve de referencia:
 
 ```xml
 <effect id="r3" name="Cross Dissolve" uid="FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"/>

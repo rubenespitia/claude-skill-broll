@@ -36,8 +36,9 @@ Tratamiento de las imagenes:
   normales. Los lanes y los adjust-transform dependen de que el importador los
   respete; un solapamiento no.
 
-  Los compuestos se renderizan TRANSICION_S mas largos que su duracion en
-  timeline, para que la transicion tenga handle a cada lado.
+  Los compuestos se renderizan 2*TRANSICION_S mas largos que su duracion en
+  timeline: una transicion centrada come media a cada lado, y dejar el minimo
+  justo hace que Resolve avise de "insufficient handles".
 
 Uso:  py preparar_resolve.py [<carpeta B-roll>]
       py preparar_resolve.py [<carpeta B-roll>] --prueba
@@ -104,15 +105,21 @@ TRANSICION_S = 0.5
 #
 # Por eso preset va a None: Cross Dissolve es neutro y Edge Wipe no. El tipo se
 # cambia en Resolve despues de importar, y ahi si se puede en bloque.
+# Cada entrada es (tipo, preset, uid). preset=None -> sin <filter-video>.
+# uid=None -> se usa EFECTO_UID, el que escribe Resolve al exportar.
 EFECTO_UID = "FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"
-TRANSICION_CICLO = [("Cross Dissolve", None)]
+TRANSICION_CICLO = [("Cross Dissolve", None, None)]
 
 EXT_VIDEO = (".mp4", ".mov", ".mxf", ".mkv", ".avi")
 
 FPS_TL = TL_NUM / TL_DEN
 FRAMES_IMAGEN = int(round(DUR_IMAGEN * FPS_TL))
 FRAMES_TRANS = int(round(TRANSICION_S * FPS_TL)) if TRANSICIONES else 0
-MEDIA_TRANS = FRAMES_TRANS // 2       # handle que necesita cada lado del corte
+MEDIA_TRANS = FRAMES_TRANS // 2       # lo que la transicion come a cada lado
+# Handle que se reserva de verdad. El minimo teorico es MEDIA_TRANS, pero
+# dejarlo justo hace que Resolve avise de "insufficient handles": redondea la
+# duracion hacia arriba y se queda sin margen. Se reserva el doble.
+HANDLE = FRAMES_TRANS
 
 # Resolve solo digiere tasas estandar. ffprobe devuelve cosas como 19001/317
 # (= 59.9401) y declarar eso en un <format> lo tumba.
@@ -232,9 +239,9 @@ def _firma_receta():
     """Los parametros con los que se horneo. Si cambian hay que rehacer los
     compuestos: mirar solo la fecha del archivo no basta, porque tocar una
     constante no toca el jpg de origen y el cache los daria por buenos."""
-    return "v3 escala=%g blur=%g brillo=%g sat=%g deriva=%dpx dirs=%d dur=%g %dx%d" % (
+    return "v4 escala=%g blur=%g brillo=%g sat=%g deriva=%dpx dirs=%d dur=%g %dx%d" % (
         ESCALA_IMAGEN, BLUR_SIGMA, FONDO_BRILLO, FONDO_SATURACION, DERIVA_PX,
-        len(DIRECCIONES), DUR_IMAGEN + TRANSICION_S, TL_ANCHO, TL_ALTO)
+        len(DIRECCIONES), DUR_IMAGEN + 2 * TRANSICION_S, TL_ANCHO, TL_ALTO)
 
 
 def componer(origen, destino, direccion=0, forzar=False):
@@ -250,7 +257,7 @@ def componer(origen, destino, direccion=0, forzar=False):
             and os.path.getmtime(destino) >= os.path.getmtime(origen)):
         return destino
 
-    dur = DUR_IMAGEN + TRANSICION_S
+    dur = DUR_IMAGEN + 2 * TRANSICION_S
     ancho_bg = (TL_ANCHO + DERIVA_PX) // 2 * 2
     alto_bg = (TL_ALTO + DERIVA_PX) // 2 * 2
     ancho_fg = int(TL_ANCHO * ESCALA_IMAGEN) // 2 * 2
@@ -398,7 +405,7 @@ def planificar(manifest, entradas):
         fps_src = info["num"] / info["den"]
         # la transicion come MEDIA_TRANS a cada lado del corte, asi que ningun
         # fragmento puede empezar antes ni acabar despues de ese margen
-        handle = int(round(MEDIA_TRANS / FPS_TL * fps_src)) + 1
+        handle = int(round(HANDLE / FPS_TL * fps_src)) + 2
         ini_util = max(handle, int(info["frames"] * MARGEN))
         fin_util = min(info["frames"] - handle,
                        info["frames"] - int(info["frames"] * MARGEN))
@@ -421,7 +428,7 @@ def planificar(manifest, entradas):
 
 def ordenar(ents):
     """Entrelaza para no dejar mas de MAX_IMG_SEGUIDAS imagenes juntas."""
-    imgs = [(e, (MEDIA_TRANS, FRAMES_IMAGEN)) for e in ents if e["imagen"]]
+    imgs = [(e, (HANDLE, FRAMES_IMAGEN)) for e in ents if e["imagen"]]
     colas = [[(e, t) for t in e["tramos"]] for e in ents if not e["imagen"]]
     vids = []
     while any(colas):
@@ -453,7 +460,12 @@ def construir_fcpxml(manifest, avisar=None):
             formatos[clave] = (fid, gen(fid))
         return formatos[clave][0]
 
-    efecto_id = "e1"
+    # un <effect> por uid distinto que pida el ciclo
+    efectos_id = {}
+    for _, preset, uid in TRANSICION_CICLO:
+        if preset is not None:
+            u = uid or EFECTO_UID
+            efectos_id.setdefault(u, "e%d" % (len(efectos_id) + 1))
     id_formato(("tl",),
                lambda f: '<format id="%s" name="FFVideoFormat1080p2398" '
                          'frameDuration="%d/%ds" width="%d" height="%d" '
@@ -541,14 +553,14 @@ def construir_fcpxml(manifest, avisar=None):
     elementos = []
     for i, c in enumerate(clips):
         elementos.append(c)
-        if FRAMES_TRANS and i + 1 < len(clips):
+        if FRAMES_TRANS and "--sin-transiciones" not in sys.argv and i + 1 < len(clips):
             corte = posiciones[i][0] + posiciones[i][1]
             # indexar por numero de corte, no por len(elementos): esa lista
             # crece con clips Y transiciones, y el ciclo saldria desordenado
-            tipo, preset = TRANSICION_CICLO[i % len(TRANSICION_CICLO)]
+            tipo, preset, uid = TRANSICION_CICLO[i % len(TRANSICION_CICLO)]
             cuerpo = ("" if preset is None
                       else '<filter-video ref="%s" name="%s"/>'
-                           % (efecto_id, attr(preset)))
+                           % (efectos_id[uid or EFECTO_UID], attr(preset)))
             elementos.append(
                 '<transition name="%s" offset="%s" duration="%s">%s</transition>'
                 % (attr(tipo), t_timeline(corte - MEDIA_TRANS),
@@ -556,11 +568,14 @@ def construir_fcpxml(manifest, avisar=None):
 
     xml = ['<?xml version="1.0" encoding="UTF-8"?>', "<!DOCTYPE fcpxml>",
            '<fcpxml version="1.9">', "<resources>"]
-    # el <effect> solo si alguna transicion lo referencia; declararlo suelto
-    # no rompe nada, pero ensucia el archivo
-    if FRAMES_TRANS and any(preset is not None for _, preset in TRANSICION_CICLO):
-        xml.append('<effect id="%s" name="Cross Dissolve" uid="%s"/>'
-                   % (efecto_id, EFECTO_UID))
+    # un <effect> por uid referenciado; declararlos sueltos no rompe nada pero
+    # ensucia el archivo
+    if FRAMES_TRANS:
+        for u, eid in efectos_id.items():
+            nombre_ef = next(t for t, pr, ui in TRANSICION_CICLO
+                             if pr is not None and (ui or EFECTO_UID) == u)
+            xml.append('<effect id="%s" name="%s" uid="%s"/>'
+                       % (eid, attr(nombre_ef), attr(u)))
     xml += [x for _, x in formatos.values()]
     xml += assets
     xml.append("</resources>")
@@ -622,11 +637,16 @@ def main():
 
     if "--sondeo" in sys.argv:
         global TRANSICION_CICLO
-        TRANSICION_CICLO = [("Slide", "Slide"),
-                            ("Slide", None),
-                            ("Edge Wipe", "Edge Wipe"),
-                            ("Push", "Push"),
-                            ("Cross Dissolve", "Cross Dissolve")]
+        _fcp = ".../Transitions.localized/%s.localized/%s.localized/%s.effectBundle"
+        TRANSICION_CICLO = [
+            ("Slide", "Slide", _fcp % ("Movements", "Slide", "Slide")),
+            ("Push", "Push", _fcp % ("Movements", "Push", "Push")),
+            ("Slide", "Slide", ".../Transitions.localized/Movements.localized/"
+                               "Slide.localized/Slide.moti"),
+            ("Slide", "Slide", "DaVinci:Slide"),
+            ("Cross Dissolve", "Cross Dissolve",
+             _fcp % ("Dissolves", "Cross Dissolve", "Cross Dissolve")),
+        ]
         # solo imagenes: cada una es exactamente un clip, asi cada corte se
         # queda con un nombre distinto del ciclo y el sondeo es legible
         recursos = [r for s_ in manifest["secciones"] for r in s_["recursos"]
@@ -641,9 +661,8 @@ def main():
             f.write(xml)
         print("B-ROLL-SONDEO.fcpxml: %d clips, %d transiciones"
               % (st["clips"], st["transiciones"]))
-        for i, (tipo, preset) in enumerate(TRANSICION_CICLO[:st["transiciones"]], 1):
-            print("  corte %d -> transition name=%-14s filter-video=%s"
-                  % (i, tipo, preset if preset is not None else "(sin filter-video)"))
+        for i, (tipo, preset, uid) in enumerate(TRANSICION_CICLO[:st["transiciones"]], 1):
+            print("  corte %d -> %-14s uid=%s" % (i, tipo, uid))
         return 0
 
     if "--prueba" in sys.argv:
@@ -663,7 +682,9 @@ def main():
         return 0
 
     xml, st = construir_fcpxml(manifest, avisar=print)
-    with open(os.path.join(AQUI, "B-ROLL-GUIA.fcpxml"), "w", encoding="utf-8") as f:
+    nombre = ("B-ROLL-GUIA-SIN-TRANS.fcpxml" if "--sin-transiciones" in sys.argv
+              else "B-ROLL-GUIA.fcpxml")
+    with open(os.path.join(AQUI, nombre), "w", encoding="utf-8") as f:
         f.write(xml)
     creados, reutilizados, copiados = arbol_por_seccion(manifest, st["entradas"])
 
@@ -677,9 +698,9 @@ def main():
     if palabras:
         print("guion           %d palabras -> %s narrados a %d ppm"
               % (palabras, mmss(palabras / PALABRAS_POR_MINUTO * 60), PALABRAS_POR_MINUTO))
-    print("B-ROLL-GUIA.fcpxml   %s   %d clips, %d transiciones, %d marcadores, %d archivos"
-          % (mmss(total_s), st["clips"], st["transiciones"], st["marcadores"],
-             st["assets"]))
+    print("%-30s %s   %d clips, %d transiciones, %d marcadores, %d archivos"
+          % (nombre, mmss(total_s), st["clips"], st["transiciones"],
+             st["marcadores"], st["assets"]))
     print("  video %s (%.0f%%)   imagen %s (%.0f%%)"
           % (mmss(video_s), 100 * video_s / total_s,
              mmss(st["frames_img"] / FPS_TL), 100 * st["frames_img"] / st["frames"]))
