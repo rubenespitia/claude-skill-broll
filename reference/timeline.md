@@ -165,9 +165,40 @@ se queda en una sola pista y todo son solapamientos normales.
 
 Efecto lateral util: los compuestos sirven tal cual en el montaje final, no solo en la guia.
 
-**La deriva del fondo alterna una y una.** La ventana de recorte se desplaza de izquierda a
-derecha en una imagen y al reves en la siguiente. Con todas iguales el montaje entero parece
-irse para el mismo lado, y se nota enseguida.
+### La deriva del fondo
+
+La ventana de recorte se desplaza sobre el fondo siguiendo un **vector unitario** que cambia
+imagen a imagen: derecha, diagonal abajo-izquierda, arriba, diagonal abajo-derecha, izquierda,
+diagonal arriba-derecha, abajo, diagonal arriba-izquierda. Con todas iguales el montaje entero
+parece irse para el mismo lado, y se nota enseguida.
+
+**La holgura va en pixeles, no en porcentaje.** Un 10% da 192 px en x pero solo 108 en y, asi
+que una diagonal recorreria mas distancia en el mismo tiempo y se veria mas rapida.
+`DERIVA_PX = 160` deja la misma holgura en los dos ejes, el modulo del vector es 1 en todas las
+direcciones y el recorrido se centra en esa holgura. Cambia la direccion, nunca la velocidad.
+
+El orden de la lista esta puesto para que dos imagenes seguidas no se muevan parecido: 135
+grados entre cada direccion y la siguiente.
+
+Escribir el diagonal como `0.707` deja el modulo en 159.94 en vez de 160. Da igual en pantalla,
+pero obliga a explicar por que el test no da exacto: mejor `1/raiz(2)` completo.
+
+#### Comprobarlo
+
+Con blur fuerte no se distingue a ojo. Se hornea un degradado conocido y se mide:
+
+| Que | Como |
+|---|---|
+| eje x | degradado horizontal, media de la franja izquierda al principio y al final |
+| eje y | degradado vertical, media de la franja superior |
+| diagonales | la misma medida: debe dar 1/raiz(2) del movimiento puro |
+
+**[verificado 2026-09-30]** Horizontal ±40, diagonal ±27.5 en el mismo eje: razon 0.69.
+Vertical ±23, diagonal ±16.4: razon 0.73.
+
+Trampa de la medicion: con `FONDO_BRILLO` negativo el extremo oscuro del degradado **satura a
+negro** y las dos lecturas dan 0.0, que parece "no se mueve". Usar un degradado que no toque los
+extremos, de gris medio a gris claro.
 
 Cuesta poco disco: 32 imagenes a 4,5 s salen en 8 MB con `libx264 -crf 20 -preset veryfast`.
 

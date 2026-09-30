@@ -83,7 +83,10 @@ ESCALA_IMAGEN = 0.80                  # tamano de la imagen dentro del encuadre
 BLUR_SIGMA = 30                       # desenfoque del fondo
 FONDO_BRILLO = -0.15                  # el fondo va mas oscuro que la imagen
 FONDO_SATURACION = 0.75
-DERIVA = 0.10                         # cuanto se pasa el fondo para poder moverse
+# Holgura del fondo en PIXELES, igual en los dos ejes. En porcentaje daria 192
+# px en x y solo 108 en y, asi que una diagonal recorreria mas distancia en el
+# mismo tiempo y se veria mas rapida.
+DERIVA_PX = 160
 
 TRANSICIONES = True
 TRANSICION_S = 0.5
@@ -185,13 +188,41 @@ def repartir(presupuesto, capacidades):
     return asignado
 
 
+# Hacia donde deriva el fondo, en vectores unitarios. El modulo es 1 en todos,
+# asi que todas las variantes recorren la misma distancia en el mismo tiempo:
+# cambia la direccion, no la velocidad. El orden esta puesto para que dos
+# imagenes seguidas no se muevan parecido.
+_D = 0.7071067811865476  # 1/raiz(2): con 0.707 el modulo se queda en 159.94
+DIRECCIONES = [
+    (1.0, 0.0),      # derecha
+    (-_D, _D),       # diagonal abajo-izquierda
+    (0.0, -1.0),     # arriba
+    (_D, _D),        # diagonal abajo-derecha
+    (-1.0, 0.0),     # izquierda
+    (_D, -_D),       # diagonal arriba-derecha
+    (0.0, 1.0),      # abajo
+    (-_D, -_D),      # diagonal arriba-izquierda
+]
+
+
+def desplazamiento(direccion):
+    """(x0, x1, y0, y1) del recorrido de la ventana de recorte, en pixeles.
+
+    El recorrido se centra en la holgura: sale y llega a la misma distancia del
+    centro, sea cual sea la direccion."""
+    dx, dy = DIRECCIONES[direccion % len(DIRECCIONES)]
+    mitad = DERIVA_PX / 2.0
+    return (mitad - dx * mitad, mitad + dx * mitad,
+            mitad - dy * mitad, mitad + dy * mitad)
+
+
 def _firma_receta():
     """Los parametros con los que se horneo. Si cambian hay que rehacer los
     compuestos: mirar solo la fecha del archivo no basta, porque tocar una
     constante no toca el jpg de origen y el cache los daria por buenos."""
-    return "v2 escala=%g blur=%g brillo=%g sat=%g deriva=%g dur=%g %dx%d" % (
-        ESCALA_IMAGEN, BLUR_SIGMA, FONDO_BRILLO, FONDO_SATURACION, DERIVA,
-        DUR_IMAGEN + TRANSICION_S, TL_ANCHO, TL_ALTO)
+    return "v3 escala=%g blur=%g brillo=%g sat=%g deriva=%dpx dirs=%d dur=%g %dx%d" % (
+        ESCALA_IMAGEN, BLUR_SIGMA, FONDO_BRILLO, FONDO_SATURACION, DERIVA_PX,
+        len(DIRECCIONES), DUR_IMAGEN + TRANSICION_S, TL_ANCHO, TL_ALTO)
 
 
 def componer(origen, destino, direccion=0, forzar=False):
@@ -208,25 +239,24 @@ def componer(origen, destino, direccion=0, forzar=False):
         return destino
 
     dur = DUR_IMAGEN + TRANSICION_S
-    ancho_bg = int(TL_ANCHO * (1 + DERIVA)) // 2 * 2
-    alto_bg = int(TL_ALTO * (1 + DERIVA)) // 2 * 2
+    ancho_bg = (TL_ANCHO + DERIVA_PX) // 2 * 2
+    alto_bg = (TL_ALTO + DERIVA_PX) // 2 * 2
     ancho_fg = int(TL_ANCHO * ESCALA_IMAGEN) // 2 * 2
     alto_fg = int(TL_ALTO * ESCALA_IMAGEN) // 2 * 2
 
-    # la ventana de recorte se desplaza sobre el fondo: de izquierda a derecha
-    # o al reves, segun toque
-    avance = "t/%g" % dur if direccion % 2 == 0 else "(1-t/%g)" % dur
+    x0, x1, y0, y1 = desplazamiento(direccion)
     filtro = (
         "[0:v]split=2[a][b];"
         "[a]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,"
         "gblur=sigma=%g,eq=brightness=%g:saturation=%g,"
-        "crop=%d:%d:x='(in_w-out_w)*%s':y='(in_h-out_h)/2'[bg];"
+        "crop=%d:%d:x='%g+(%g)*t/%g':y='%g+(%g)*t/%g'[bg];"
         "[b]scale=%d:%d:force_original_aspect_ratio=decrease,"
         "scale=trunc(iw/2)*2:trunc(ih/2)*2[fg];"
         "[bg][fg]overlay=(W-w)/2:(H-h)/2"
         % (ancho_bg, alto_bg, ancho_bg, alto_bg,
            BLUR_SIGMA, FONDO_BRILLO, FONDO_SATURACION,
-           TL_ANCHO, TL_ALTO, avance, ancho_fg, alto_fg))
+           TL_ANCHO, TL_ALTO, x0, x1 - x0, dur, y0, y1 - y0, dur,
+           ancho_fg, alto_fg))
 
     os.makedirs(os.path.dirname(destino), exist_ok=True)
     r = subprocess.run(
