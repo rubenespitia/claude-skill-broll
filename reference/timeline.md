@@ -165,8 +165,16 @@ se queda en una sola pista y todo son solapamientos normales.
 
 Efecto lateral util: los compuestos sirven tal cual en el montaje final, no solo en la guia.
 
+**La deriva del fondo alterna una y una.** La ventana de recorte se desplaza de izquierda a
+derecha en una imagen y al reves en la siguiente. Con todas iguales el montaje entero parece
+irse para el mismo lado, y se nota enseguida.
+
 Cuesta poco disco: 32 imagenes a 4,5 s salen en 8 MB con `libx264 -crf 20 -preset veryfast`.
-Se rehacen solo si el original es mas nuevo que el compuesto.
+
+**El cache va por firma de receta, no solo por fecha.** `compuestos/.receta` guarda los
+parametros con los que se horneo. Mirar solo la fecha del archivo no basta: tocar
+`ESCALA_IMAGEN` o `BLUR_SIGMA` no toca el jpg de origen, asi que los compuestos viejos pasarian
+por buenos y el cambio no se veria por ningun lado.
 
 | Constante | Por defecto | Que hace |
 |---|---|---|
@@ -196,6 +204,24 @@ sobra antes de su punto de entrada y media despues de su salida.
 |---|---|
 | Imagen compuesta | se renderiza `TRANSICION_S` mas larga de lo que dura en timeline |
 | Fragmento de video | `MARGEN` ya deja sitio, pero hay que **forzarlo**: ningun fragmento puede empezar antes del handle ni acabar despues |
+
+**El tipo se cicla corte a corte** con `TRANSICION_CICLO`, una lista de nombres. Con un solo
+elemento salen todas iguales; con dos, alternan una y una.
+
+Resolve **si** respeta el `name` del `<transition>` y su `duration`. Lo que no esta comprobado
+es que reconozca los nombres de preset con direccion (`Slide, Left-Right`). Para averiguarlo sin
+generar noventa transiciones a ciegas:
+
+```
+py scripts/preparar_resolve.py <carpeta> --sondeo
+```
+
+Escribe `B-ROLL-SONDEO.fcpxml`, seis clips y un nombre distinto en cada corte. Se importa una
+vez y el inspector dice cual reconocio.
+
+Trampa al ciclar: **indexar por numero de corte**, no por la posicion en la lista de elementos
+del spine, que crece con clips *y* transiciones. Con una alternancia de dos, ese error da un
+patron irregular que no se ve mirando el timeline.
 
 Si Resolve no traga las transiciones, `TRANSICIONES = False` y se regenera. El resto del
 timeline no depende de ellas.

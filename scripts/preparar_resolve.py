@@ -85,8 +85,12 @@ FONDO_BRILLO = -0.15                  # el fondo va mas oscuro que la imagen
 FONDO_SATURACION = 0.75
 DERIVA = 0.10                         # cuanto se pasa el fondo para poder moverse
 
-TRANSICIONES = True                   # cross dissolve entre clips
+TRANSICIONES = True
 TRANSICION_S = 0.5
+# Nombres que se ciclan corte a corte. Resolve respeta el `name` del
+# <transition>; lo que no esta claro es que reconozca los nombres de preset con
+# direccion. Sondearlo con --sondeo antes de fiarse.
+TRANSICION_CICLO = ["Cross Dissolve"]
 
 EXT_VIDEO = (".mp4", ".mov", ".mxf", ".mkv", ".avi")
 
@@ -181,13 +185,25 @@ def repartir(presupuesto, capacidades):
     return asignado
 
 
-def componer(origen, destino):
+def _firma_receta():
+    """Los parametros con los que se horneo. Si cambian hay que rehacer los
+    compuestos: mirar solo la fecha del archivo no basta, porque tocar una
+    constante no toca el jpg de origen y el cache los daria por buenos."""
+    return "v2 escala=%g blur=%g brillo=%g sat=%g deriva=%g dur=%g %dx%d" % (
+        ESCALA_IMAGEN, BLUR_SIGMA, FONDO_BRILLO, FONDO_SATURACION, DERIVA,
+        DUR_IMAGEN + TRANSICION_S, TL_ANCHO, TL_ALTO)
+
+
+def componer(origen, destino, direccion=0, forzar=False):
     """Hornea una imagen fija a un clip 1920x1080: la propia imagen desenfocada
     y derivando de fondo, la imagen nitida encima al ESCALA_IMAGEN, centrada.
 
+    `direccion` alterna hacia donde deriva el fondo. Con todas iguales el
+    montaje entero parece irse para el mismo lado.
+
     Se renderiza TRANSICION_S de mas para que la transicion tenga handle a cada
-    lado. Si el destino ya existe y es mas nuevo que el origen, no se rehace."""
-    if (os.path.isfile(destino)
+    lado."""
+    if (not forzar and os.path.isfile(destino)
             and os.path.getmtime(destino) >= os.path.getmtime(origen)):
         return destino
 
@@ -197,17 +213,20 @@ def componer(origen, destino):
     ancho_fg = int(TL_ANCHO * ESCALA_IMAGEN) // 2 * 2
     alto_fg = int(TL_ALTO * ESCALA_IMAGEN) // 2 * 2
 
+    # la ventana de recorte se desplaza sobre el fondo: de izquierda a derecha
+    # o al reves, segun toque
+    avance = "t/%g" % dur if direccion % 2 == 0 else "(1-t/%g)" % dur
     filtro = (
         "[0:v]split=2[a][b];"
         "[a]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,"
         "gblur=sigma=%g,eq=brightness=%g:saturation=%g,"
-        "crop=%d:%d:x='(in_w-out_w)*t/%g':y='(in_h-out_h)/2'[bg];"
+        "crop=%d:%d:x='(in_w-out_w)*%s':y='(in_h-out_h)/2'[bg];"
         "[b]scale=%d:%d:force_original_aspect_ratio=decrease,"
         "scale=trunc(iw/2)*2:trunc(ih/2)*2[fg];"
         "[bg][fg]overlay=(W-w)/2:(H-h)/2"
         % (ancho_bg, alto_bg, ancho_bg, alto_bg,
            BLUR_SIGMA, FONDO_BRILLO, FONDO_SATURACION,
-           TL_ANCHO, TL_ALTO, dur, ancho_fg, alto_fg))
+           TL_ANCHO, TL_ALTO, avance, ancho_fg, alto_fg))
 
     os.makedirs(os.path.dirname(destino), exist_ok=True)
     r = subprocess.run(
@@ -240,18 +259,45 @@ def recolectar(manifest, avisar=None):
 
     imgs = [p for p in pendientes
             if os.path.splitext(p[2])[1].lower() not in EXT_VIDEO]
-    if COMPONER_IMAGENES and imgs and avisar:
-        avisar("componiendo %d imagenes..." % len(imgs))
 
+    # si la receta cambio, los compuestos de disco ya no valen aunque sean mas
+    # nuevos que su origen
+    receta = os.path.join(AQUI, "compuestos", ".receta")
+    firma = _firma_receta()
+    previa = None
+    if os.path.isfile(receta):
+        with open(receta, encoding="utf-8") as f:
+            previa = f.read().strip()
+    rehacer = previa != firma
+
+    def _destino(ruta):
+        base = os.path.splitext(os.path.basename(ruta))[0]
+        return os.path.join(AQUI, "compuestos", base + "_comp.mp4")
+
+    if COMPONER_IMAGENES and imgs and avisar:
+        por_hacer = [p for p in imgs
+                     if rehacer or not os.path.isfile(_destino(p[2]))
+                     or os.path.getmtime(_destino(p[2])) < os.path.getmtime(p[2])]
+        if por_hacer:
+            avisar("componiendo %d de %d imagenes%s..."
+                   % (len(por_hacer), len(imgs),
+                      " (receta nueva)" if rehacer and previa else ""))
+
+    n_img = 0
     for seccion, recurso, ruta in pendientes:
         es_img = os.path.splitext(ruta)[1].lower() not in EXT_VIDEO
         origen = ruta
         if es_img and COMPONER_IMAGENES:
-            base = os.path.splitext(os.path.basename(ruta))[0]
-            ruta = componer(ruta, os.path.join(AQUI, "compuestos", base + "_comp.mp4"))
+            ruta = componer(ruta, _destino(ruta), direccion=n_img, forzar=rehacer)
+            n_img += 1
         entradas.append({"seccion": seccion, "recurso": recurso,
                          "ruta": ruta, "origen": origen, "imagen": es_img,
                          "info": sondear(ruta)})
+
+    if COMPONER_IMAGENES and imgs:
+        os.makedirs(os.path.dirname(receta), exist_ok=True)
+        with open(receta, "w", encoding="utf-8") as f:
+            f.write(firma)
     return entradas, faltan
 
 
@@ -454,9 +500,13 @@ def construir_fcpxml(manifest, avisar=None):
         elementos.append(c)
         if FRAMES_TRANS and i + 1 < len(clips):
             corte = posiciones[i][0] + posiciones[i][1]
+            # indexar por numero de corte, no por len(elementos): esa lista
+            # crece con clips Y transiciones, y el ciclo saldria desordenado
+            nombre = TRANSICION_CICLO[i % len(TRANSICION_CICLO)]
             elementos.append(
-                '<transition name="Cross Dissolve" offset="%s" duration="%s"/>'
-                % (t_timeline(corte - MEDIA_TRANS), t_timeline(FRAMES_TRANS)))
+                '<transition name="%s" offset="%s" duration="%s"/>'
+                % (attr(nombre), t_timeline(corte - MEDIA_TRANS),
+                   t_timeline(FRAMES_TRANS)))
 
     xml = ['<?xml version="1.0" encoding="UTF-8"?>', "<!DOCTYPE fcpxml>",
            '<fcpxml version="1.9">', "<resources>"]
@@ -518,6 +568,28 @@ def main():
         return 1
     with open(ruta_manifest, encoding="utf-8") as f:
         manifest = json.load(f)
+
+    if "--sondeo" in sys.argv:
+        global TRANSICION_CICLO
+        TRANSICION_CICLO = ["Cross Dissolve", "Slide, Left-Right",
+                            "Slide, Right-Left", "Push, Left-Right", "Wipe"]
+        # solo imagenes: cada una es exactamente un clip, asi cada corte se
+        # queda con un nombre distinto del ciclo y el sondeo es legible
+        recursos = [r for s_ in manifest["secciones"] for r in s_["recursos"]
+                    if os.path.splitext(r["archivos"][0])[1].lower() not in EXT_VIDEO]
+        elegidos = [dict(r, archivos=r["archivos"][:1])
+                    for r in recursos[:len(TRANSICION_CICLO) + 1]]
+        manifest = {"proyecto": manifest["proyecto"],
+                    "secciones": [{"n": "01", "titulo": "Sondeo", "palabras": 100,
+                                   "recursos": elegidos}]}
+        xml, st = construir_fcpxml(manifest)
+        with open(os.path.join(AQUI, "B-ROLL-SONDEO.fcpxml"), "w", encoding="utf-8") as f:
+            f.write(xml)
+        print("B-ROLL-SONDEO.fcpxml: %d clips, %d transiciones"
+              % (st["clips"], st["transiciones"]))
+        for i, n in enumerate(TRANSICION_CICLO[:st["transiciones"]], 1):
+            print("  corte %d -> %s" % (i, n))
+        return 0
 
     if "--prueba" in sys.argv:
         recursos = [r for s in manifest["secciones"] for r in s["recursos"]]
