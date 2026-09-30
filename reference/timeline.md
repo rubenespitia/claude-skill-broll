@@ -239,8 +239,16 @@ sobra antes de su punto de entrada y media despues de su salida.
 **El tipo se cicla corte a corte** con `TRANSICION_CICLO`, una lista de nombres. Con un solo
 elemento salen todas iguales; con dos, alternan una y una.
 
-Resolve **si** respeta el `name` del `<transition>` y su `duration`. Lo que no esta comprobado
-es que reconozca los nombres de preset con direccion (`Slide, Left-Right`). Para averiguarlo sin
+**[verificado 2026-09-30] Resolve ignora el `name` del `<transition>`.** Sondeados
+`Cross Dissolve`, `Slide, Left-Right`, `Slide, Right-Left`, `Push, Left-Right` y `Wipe` en un
+mismo archivo: los cinco entran como **Cross Dissolve**. De lo que declara el XML solo respeta
+la **duracion** y la **posicion respecto al corte**.
+
+Asi que el tipo y la direccion **no se fijan desde el FCPXML**. Si hacen falta, se cambian en
+Resolve despues de importar, seleccionando varias transiciones a la vez y tocando el Inspector
+una sola vez por grupo.
+
+`TRANSICION_CICLO` se queda por si una version futura si lo respeta. Para comprobarlo sin
 generar noventa transiciones a ciegas:
 
 ```
