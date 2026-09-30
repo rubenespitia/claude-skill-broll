@@ -141,6 +141,65 @@ intercalarlo.
 Esto **reordena dentro de la seccion, nunca entre secciones**. Los recursos de una seccion son
 opciones para cubrirla, no una secuencia obligatoria.
 
+### Tratamiento de las imagenes fijas
+
+Una imagen a pantalla completa entre dos clips de video se nota como un bache, y los posters
+verticales salen con barras negras a los lados. Por eso cada imagen se **hornea** con ffmpeg a
+`compuestos/<nombre>_comp.mp4`: la propia imagen desenfocada, oscurecida y derivando despacio de
+fondo, y la imagen nitida encima al `ESCALA_IMAGEN` del encuadre, centrada.
+
+```
+  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  ░░░  ┌───────────────┐  ░░░     ░ = la misma imagen
+  ░░░  │   la imagen   │  ░░░         blur + deriva lenta
+  ░░░  │    al 80%     │  ░░░
+  ░░░  └───────────────┘  ░░░     un solo clip, una sola pista
+  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+```
+
+**Se hornea en vez de montar dos pistas.** FCPXML permite hacerlo en vivo: el fondo en el spine
+y la imagen como clip conectado en `lane="1"` con `<adjust-transform scale="0.8 0.8">`. Pero eso
+depende de que el importador respete lanes y transforms, y ademas los clips conectados **no
+admiten transiciones**: el fondo disolveria y la imagen daria un salto. Horneando, el timeline
+se queda en una sola pista y todo son solapamientos normales.
+
+Efecto lateral util: los compuestos sirven tal cual en el montaje final, no solo en la guia.
+
+Cuesta poco disco: 32 imagenes a 4,5 s salen en 8 MB con `libx264 -crf 20 -preset veryfast`.
+Se rehacen solo si el original es mas nuevo que el compuesto.
+
+| Constante | Por defecto | Que hace |
+|---|---|---|
+| `COMPONER_IMAGENES` | True | a False, las imagenes entran crudas |
+| `ESCALA_IMAGEN` | 0.80 | tamano de la imagen dentro del encuadre |
+| `BLUR_SIGMA` | 30 | desenfoque del fondo |
+| `FONDO_BRILLO` / `FONDO_SATURACION` | -0.15 / 0.75 | el fondo va mas apagado que la imagen |
+| `DERIVA` | 0.10 | cuanto se pasa el fondo del encuadre para poder moverse |
+
+**Los compuestos tienen que estar en los bins.** El timeline los referencia a ellos, no a los
+jpg, asi que `por-seccion/` los enlaza tambien. Si no, Resolve no resuelve el enlace al importar
+con *Automatically import source clips* desmarcado.
+
+### Transiciones
+
+`<transition name="Cross Dissolve" offset="..." duration="..."/>`, hermano de los clips dentro
+del spine.
+
+**No anaden tiempo.** Se centran en el corte y se comen el handle de los dos clips que tocan,
+asi que los offsets de los clips no cambian y la duracion de la secuencia sigue siendo la suma
+de las duraciones. La transicion va en `corte - TRANSICION_S/2`.
+
+De ahi sale el requisito que se olvida: **cada clip necesita handle**. Media transicion de
+sobra antes de su punto de entrada y media despues de su salida.
+
+| Tipo de clip | De donde sale el handle |
+|---|---|
+| Imagen compuesta | se renderiza `TRANSICION_S` mas larga de lo que dura en timeline |
+| Fragmento de video | `MARGEN` ya deja sitio, pero hay que **forzarlo**: ningun fragmento puede empezar antes del handle ni acabar despues |
+
+Si Resolve no traga las transiciones, `TRANSICIONES = False` y se regenera. El resto del
+timeline no depende de ellas.
+
 ### Lo que el reparto no sabe
 
 Reparte a partes iguales y **no conoce el peso editorial**. Una autocita de una frase recibe lo
@@ -190,6 +249,13 @@ plausibles**.
 | ningun marcador fuera del rango de su clip | |
 | todos los `src` existen en disco | |
 | racha de imagenes ≤ `MAX_IMG_SEGUIDAS` | la regla de ritmo, comprobada sobre el XML final |
+| cada transicion cae centrada en un corte | una transicion suelta no la monta |
+| los dos clips de cada transicion tienen handle | sin handle no hay nada que disolver |
+
+Las comprobaciones de handle solo saltan si de verdad hay algo que comprobar. Probarlas a mano
+al tocarlas: quitarle el `start` a un clip intermedio debe dar *sin handle de entrada*, y
+estirar la duracion de un clip hasta el final de su asset debe dar *sin handle de salida*. Un
+chequeo que nunca falla no esta comprobando nada.
 
 Sale con codigo 1 si encuentra algo.
 

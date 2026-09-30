@@ -24,10 +24,25 @@ Como se reparte la duracion:
   4. Los clips se entrelazan para que **no haya mas de MAX_IMG_SEGUIDAS
      imagenes seguidas**. Eso reordena dentro de la seccion, no entre secciones.
 
+Tratamiento de las imagenes:
+
+  Cada imagen fija se hornea con ffmpeg a compuestos/<nombre>_comp.mp4, un clip
+  1920x1080 con la propia imagen desenfocada y derivando de fondo y la imagen
+  nitida encima al ESCALA_IMAGEN, centrada. Resuelve de paso los posters
+  verticales, que sin fondo salen con barras negras.
+
+  Se hornea en vez de montar dos pistas con adjust-transform porque asi el
+  timeline se queda en una sola pista y las transiciones son solapamientos
+  normales. Los lanes y los adjust-transform dependen de que el importador los
+  respete; un solapamiento no.
+
+  Los compuestos se renderizan TRANSICION_S mas largos que su duracion en
+  timeline, para que la transicion tenga handle a cada lado.
+
 Uso:  py preparar_resolve.py [<carpeta B-roll>]
       py preparar_resolve.py [<carpeta B-roll>] --prueba
 
-Sin argumento usa el directorio actual. Necesita ffprobe en el PATH.
+Sin argumento usa el directorio actual. Necesita ffmpeg y ffprobe en el PATH.
 """
 
 import hashlib
@@ -58,10 +73,27 @@ MARGEN = 0.08                         # cabeza y cola que se descartan de cada v
 MAX_IMG_SEGUIDAS = 2
 PALABRAS_POR_MINUTO = 160             # solo para el informe
 
+# Tratamiento de las imagenes fijas. Cada una se hornea con ffmpeg a un clip
+# 1920x1080: la propia imagen desenfocada y derivando de fondo, y la imagen
+# nitida encima al ESCALA_IMAGEN del encuadre, centrada. Asi el timeline se
+# queda en una sola pista y las transiciones son solapamientos normales, que es
+# lo unico que el importador de Resolve traga sin dramas.
+COMPONER_IMAGENES = True
+ESCALA_IMAGEN = 0.80                  # tamano de la imagen dentro del encuadre
+BLUR_SIGMA = 30                       # desenfoque del fondo
+FONDO_BRILLO = -0.15                  # el fondo va mas oscuro que la imagen
+FONDO_SATURACION = 0.75
+DERIVA = 0.10                         # cuanto se pasa el fondo para poder moverse
+
+TRANSICIONES = True                   # cross dissolve entre clips
+TRANSICION_S = 0.5
+
 EXT_VIDEO = (".mp4", ".mov", ".mxf", ".mkv", ".avi")
 
 FPS_TL = TL_NUM / TL_DEN
 FRAMES_IMAGEN = int(round(DUR_IMAGEN * FPS_TL))
+FRAMES_TRANS = int(round(TRANSICION_S * FPS_TL)) if TRANSICIONES else 0
+MEDIA_TRANS = FRAMES_TRANS // 2       # handle que necesita cada lado del corte
 
 # Resolve solo digiere tasas estandar. ffprobe devuelve cosas como 19001/317
 # (= 59.9401) y declarar eso en un <format> lo tumba.
@@ -149,8 +181,54 @@ def repartir(presupuesto, capacidades):
     return asignado
 
 
-def recolectar(manifest):
+def componer(origen, destino):
+    """Hornea una imagen fija a un clip 1920x1080: la propia imagen desenfocada
+    y derivando de fondo, la imagen nitida encima al ESCALA_IMAGEN, centrada.
+
+    Se renderiza TRANSICION_S de mas para que la transicion tenga handle a cada
+    lado. Si el destino ya existe y es mas nuevo que el origen, no se rehace."""
+    if (os.path.isfile(destino)
+            and os.path.getmtime(destino) >= os.path.getmtime(origen)):
+        return destino
+
+    dur = DUR_IMAGEN + TRANSICION_S
+    ancho_bg = int(TL_ANCHO * (1 + DERIVA)) // 2 * 2
+    alto_bg = int(TL_ALTO * (1 + DERIVA)) // 2 * 2
+    ancho_fg = int(TL_ANCHO * ESCALA_IMAGEN) // 2 * 2
+    alto_fg = int(TL_ALTO * ESCALA_IMAGEN) // 2 * 2
+
+    filtro = (
+        "[0:v]split=2[a][b];"
+        "[a]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,"
+        "gblur=sigma=%g,eq=brightness=%g:saturation=%g,"
+        "crop=%d:%d:x='(in_w-out_w)*t/%g':y='(in_h-out_h)/2'[bg];"
+        "[b]scale=%d:%d:force_original_aspect_ratio=decrease,"
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2[fg];"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2"
+        % (ancho_bg, alto_bg, ancho_bg, alto_bg,
+           BLUR_SIGMA, FONDO_BRILLO, FONDO_SATURACION,
+           TL_ANCHO, TL_ALTO, dur, ancho_fg, alto_fg))
+
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    r = subprocess.run(
+        ["ffmpeg", "-v", "error", "-loop", "1",
+         "-framerate", "%d/%d" % (TL_NUM, TL_DEN), "-i", origen,
+         "-t", "%g" % dur, "-filter_complex", filtro,
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+         "-pix_fmt", "yuv420p", "-an", "-y", destino],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("ffmpeg fallo componiendo %s:\n%s"
+                           % (os.path.basename(origen), r.stderr.strip()[:400]))
+    return destino
+
+
+def recolectar(manifest, avisar=None):
+    """Sonda todos los archivos y, si toca, hornea las imagenes. Cada entrada
+    lleva `imagen`, que dice que **beat** es, y `ruta`, que es el archivo que
+    acaba en el timeline: para una imagen compuesta, el mp4, no el jpg."""
     entradas, faltan = [], []
+    pendientes = []
     for seccion in manifest["secciones"]:
         for recurso in seccion["recursos"]:
             for rel in recurso["archivos"]:
@@ -158,8 +236,22 @@ def recolectar(manifest):
                 if not os.path.isfile(ruta):
                     faltan.append(rel)
                     continue
-                entradas.append({"seccion": seccion, "recurso": recurso,
-                                 "ruta": ruta, "info": sondear(ruta)})
+                pendientes.append((seccion, recurso, ruta))
+
+    imgs = [p for p in pendientes
+            if os.path.splitext(p[2])[1].lower() not in EXT_VIDEO]
+    if COMPONER_IMAGENES and imgs and avisar:
+        avisar("componiendo %d imagenes..." % len(imgs))
+
+    for seccion, recurso, ruta in pendientes:
+        es_img = os.path.splitext(ruta)[1].lower() not in EXT_VIDEO
+        origen = ruta
+        if es_img and COMPONER_IMAGENES:
+            base = os.path.splitext(os.path.basename(ruta))[0]
+            ruta = componer(ruta, os.path.join(AQUI, "compuestos", base + "_comp.mp4"))
+        entradas.append({"seccion": seccion, "recurso": recurso,
+                         "ruta": ruta, "origen": origen, "imagen": es_img,
+                         "info": sondear(ruta)})
     return entradas, faltan
 
 
@@ -170,14 +262,14 @@ def planificar(manifest, entradas):
     palabras = sum(s.get("palabras", 1) for s in manifest["secciones"])
     restante = {}
     for e in entradas:
-        if e["info"]["video"] and e["ruta"] not in restante:
+        if not e["imagen"] and e["ruta"] not in restante:
             restante[e["ruta"]] = capacidad(e["info"])
 
     informe = []
     for seccion in manifest["secciones"]:
         ents = [e for e in entradas if e["seccion"] is seccion]
-        imgs = [e for e in ents if not e["info"]["video"]]
-        vids = [e for e in ents if e["info"]["video"]]
+        imgs = [e for e in ents if e["imagen"]]
+        vids = [e for e in ents if not e["imagen"]]
         presupuesto = int(total * seccion.get("palabras", 1) / palabras)
         frames_img = len(imgs) * FRAMES_IMAGEN
         presupuesto_v = max(0, presupuesto - frames_img)
@@ -208,16 +300,20 @@ def planificar(manifest, entradas):
     # contando los que pidan todas las secciones donde aparece
     por_ruta = Counter()
     for e in entradas:
-        if e["info"]["video"]:
+        if not e["imagen"]:
             por_ruta[e["ruta"]] += e["n_seg"]
     cursor = defaultdict(int)
     for e in entradas:
-        if not e["info"]["video"]:
+        if e["imagen"]:
             continue
         info = e["info"]
         fps_src = info["num"] / info["den"]
-        ini_util = int(info["frames"] * MARGEN)
-        fin_util = info["frames"] - int(info["frames"] * MARGEN)
+        # la transicion come MEDIA_TRANS a cada lado del corte, asi que ningun
+        # fragmento puede empezar antes ni acabar despues de ese margen
+        handle = int(round(MEDIA_TRANS / FPS_TL * fps_src)) + 1
+        ini_util = max(handle, int(info["frames"] * MARGEN))
+        fin_util = min(info["frames"] - handle,
+                       info["frames"] - int(info["frames"] * MARGEN))
         bloque = max(1, (fin_util - ini_util) // max(1, por_ruta[e["ruta"]]))
         base, resto = divmod(e["frames"], e["n_seg"])
         tramos = []
@@ -228,7 +324,8 @@ def planificar(manifest, entradas):
             k = cursor[e["ruta"]]
             cursor[e["ruta"]] += 1
             largo = int(round(dur_tl / FPS_TL * fps_src))
-            arranque = min(ini_util + k * bloque, max(0, info["frames"] - largo))
+            arranque = min(ini_util + k * bloque, max(handle, fin_util - largo))
+            arranque = max(handle, min(arranque, info["frames"] - largo - handle))
             tramos.append((max(0, arranque), dur_tl))
         e["tramos"] = tramos
     return informe
@@ -236,8 +333,8 @@ def planificar(manifest, entradas):
 
 def ordenar(ents):
     """Entrelaza para no dejar mas de MAX_IMG_SEGUIDAS imagenes juntas."""
-    imgs = [(e, (0, FRAMES_IMAGEN)) for e in ents if not e["info"]["video"]]
-    colas = [[(e, t) for t in e["tramos"]] for e in ents if e["info"]["video"]]
+    imgs = [(e, (MEDIA_TRANS, FRAMES_IMAGEN)) for e in ents if e["imagen"]]
+    colas = [[(e, t) for t in e["tramos"]] for e in ents if not e["imagen"]]
     vids = []
     while any(colas):
         for c in colas:
@@ -255,8 +352,8 @@ def ordenar(ents):
     return salida
 
 
-def construir_fcpxml(manifest):
-    entradas, faltan = recolectar(manifest)
+def construir_fcpxml(manifest, avisar=None):
+    entradas, faltan = recolectar(manifest, avisar)
     informe = planificar(manifest, entradas)
 
     formatos, assets, clips = {}, [], []
@@ -314,6 +411,7 @@ def construir_fcpxml(manifest):
         return cache[ruta]
 
     pos = 0
+    posiciones = []
     marcados = set()
     frames_img_tot = 0
     for seccion in manifest["secciones"]:
@@ -327,6 +425,7 @@ def construir_fcpxml(manifest):
             else:
                 inicio = "0s"
                 dur_marca = t_timeline(1)
+            if e["imagen"]:
                 frames_img_tot += dur_tl
 
             clave = (seccion["n"], e["recurso"]["id"])
@@ -345,7 +444,19 @@ def construir_fcpxml(manifest):
                 % (aid, t_timeline(pos),
                    attr(os.path.splitext(os.path.basename(e["ruta"]))[0]),
                    inicio, t_timeline(dur_tl), fid, marcador))
+            posiciones.append((pos, dur_tl))
             pos += dur_tl
+
+    # Las transiciones no anaden tiempo: se centran en el corte y se comen el
+    # handle de los dos clips. Por eso los offsets de los clips no cambian.
+    elementos = []
+    for i, c in enumerate(clips):
+        elementos.append(c)
+        if FRAMES_TRANS and i + 1 < len(clips):
+            corte = posiciones[i][0] + posiciones[i][1]
+            elementos.append(
+                '<transition name="Cross Dissolve" offset="%s" duration="%s"/>'
+                % (t_timeline(corte - MEDIA_TRANS), t_timeline(FRAMES_TRANS)))
 
     xml = ['<?xml version="1.0" encoding="UTF-8"?>', "<!DOCTYPE fcpxml>",
            '<fcpxml version="1.9">', "<resources>"]
@@ -356,24 +467,30 @@ def construir_fcpxml(manifest):
     xml.append('<project name="B-ROLL GUIA">')
     xml.append('<sequence format="%s" duration="%s" tcStart="0s" tcFormat="NDF" '
                'audioLayout="stereo" audioRate="48k"><spine>' % (fid_tl, t_timeline(pos)))
-    xml += clips
+    xml += elementos
     xml.append("</spine></sequence></project></event></library></fcpxml>")
 
     stats = {"frames": pos, "clips": len(clips), "assets": len(cache),
              "marcadores": len(marcados), "frames_img": frames_img_tot,
-             "faltan": faltan, "informe": informe}
+             "transiciones": len(elementos) - len(clips),
+             "faltan": faltan, "informe": informe, "entradas": entradas}
     return "\n".join(xml), stats
 
 
-def arbol_por_seccion(manifest):
+def arbol_por_seccion(manifest, entradas=None):
     raiz = os.path.join(AQUI, "por-seccion")
     creados = reutilizados = copiados = 0
+    extra = defaultdict(list)
+    for e in entradas or []:
+        if e["ruta"] != e.get("origen"):
+            extra[e["seccion"]["n"]].append(e["ruta"])
     for seccion in manifest["secciones"]:
         destino = os.path.join(raiz, "%s %s" % (seccion["n"], seccion["titulo"]))
         os.makedirs(destino, exist_ok=True)
-        for recurso in seccion["recursos"]:
-            for rel in recurso["archivos"]:
-                origen = os.path.join(AQUI, rel.replace("/", os.sep))
+        fuentes = [os.path.join(AQUI, rel.replace("/", os.sep))
+                   for recurso in seccion["recursos"] for rel in recurso["archivos"]]
+        fuentes += extra[seccion["n"]]
+        for origen in fuentes:
                 if not os.path.isfile(origen):
                     continue
                 enlace = os.path.join(destino, os.path.basename(origen))
@@ -418,10 +535,10 @@ def main():
         print("B-ROLL-PRUEBA.fcpxml: %d clips" % st["clips"])
         return 0
 
-    creados, reutilizados, copiados = arbol_por_seccion(manifest)
-    xml, st = construir_fcpxml(manifest)
+    xml, st = construir_fcpxml(manifest, avisar=print)
     with open(os.path.join(AQUI, "B-ROLL-GUIA.fcpxml"), "w", encoding="utf-8") as f:
         f.write(xml)
+    creados, reutilizados, copiados = arbol_por_seccion(manifest, st["entradas"])
 
     guion = manifest.get("guion", {})
     palabras = guion.get("palabras")
@@ -433,8 +550,9 @@ def main():
     if palabras:
         print("guion           %d palabras -> %s narrados a %d ppm"
               % (palabras, mmss(palabras / PALABRAS_POR_MINUTO * 60), PALABRAS_POR_MINUTO))
-    print("B-ROLL-GUIA.fcpxml   %s   %d clips, %d marcadores, %d archivos"
-          % (mmss(total_s), st["clips"], st["marcadores"], st["assets"]))
+    print("B-ROLL-GUIA.fcpxml   %s   %d clips, %d transiciones, %d marcadores, %d archivos"
+          % (mmss(total_s), st["clips"], st["transiciones"], st["marcadores"],
+             st["assets"]))
     print("  video %s (%.0f%%)   imagen %s (%.0f%%)"
           % (mmss(video_s), 100 * video_s / total_s,
              mmss(st["frames_img"] / FPS_TL), 100 * st["frames_img"] / st["frames"]))

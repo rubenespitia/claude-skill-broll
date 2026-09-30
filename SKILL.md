@@ -19,9 +19,9 @@ Buscar candidatos y escribir `candidatos.md` en la carpeta de la pieza. Nada se 
 `CREDITOS.txt`. Reportar lo que fallo, no rellenarlo en silencio con otra cosa.
 
 **Fase 4 - Llevarlo al timeline.** Escribir `manifest.json` con el mapa guion→recurso, generar
-los bins por seccion y un timeline guia con un marcador por recurso. Detalle en
-`reference/timeline.md`. Solo si el usuario lo pide: bajar el material ya es una entrega
-completa.
+los bins por seccion y un timeline guia con un marcador por recurso, transiciones y las imagenes
+horneadas sobre un fondo desenfocado de si mismas. Detalle en `reference/timeline.md`. Solo si
+el usuario lo pide: bajar el material ya es una entrega completa.
 
 ### Que version del guion
 
@@ -47,12 +47,14 @@ Dentro de la carpeta de la pieza, que sigue la convencion del vault `content-cre
     stock\
 
   manifest.json          fase 4: mapa guion->recurso
+  compuestos\            fase 4: imagenes horneadas con fondo, 1920x1080
   por-seccion\           fase 4: enlaces duros por seccion, para los bins
-  B-ROLL-GUIA.fcpxml     fase 4: timeline con marcadores
+  B-ROLL-GUIA.fcpxml     fase 4: timeline con marcadores y transiciones
 ```
 
-Los tres ultimos solo existen si se llego a la fase 4. `por-seccion\` son **enlaces duros**: no
-duplican disco, y el arbol por tipo se queda como esta porque es el que describe `CREDITOS.txt`.
+Los cuatro ultimos solo existen si se llego a la fase 4. `por-seccion\` son **enlaces duros**:
+no duplican disco, y el arbol por tipo se queda como esta porque es el que describe
+`CREDITOS.txt`.
 
 `<CARPETA_VIDEO>` es la raiz donde vive el trabajo de video. En la maquina de origen es
 `C:\Users\<usuario>\Videos\1.-YOUTUBE`. Si no esta clara, preguntar una vez y no volver a
@@ -144,7 +146,8 @@ Ambas son gratuitas: pexels.com/api y pixabay.com/api/docs.
 - `reference/fuentes.md` - de donde sale cada tipo, endpoints verificados y sus trampas
 - `reference/descarga.md` - comandos exactos de yt-dlp, ffmpeg y capturas de pagina
 - `reference/creditos.md` - formato del TXT y que exige cada licencia
-- `reference/timeline.md` - fase 4: manifest, reparto de duracion, ritmo y trampas de FCPXML
+- `reference/timeline.md` - fase 4: manifest, reparto de duracion, ritmo, fondos, transiciones
+  y trampas de FCPXML
 - `assets/candidatos.plantilla.md` - tabla de la fase 1
 - `assets/CREDITOS.plantilla.txt` - esqueleto del TXT final
 - `assets/manifest.plantilla.json` - esqueleto del mapa guion->recurso de la fase 4

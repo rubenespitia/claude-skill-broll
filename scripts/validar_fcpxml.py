@@ -80,11 +80,16 @@ def validar(ruta, max_img=MAX_IMG_SEGUIDAS):
         if not os.path.isfile(p):
             mal("src que no existe en disco: %s" % p)
 
-    # una imagen es un asset sin audio cuyo format declara espacio de color de
-    # imagen fija; sirve para contar rachas
-    es_img = {aid: (formatos.get(a.get("format"), {}).get("colorSpace") == "1-13-1"
-                    if a.get("format") in formatos else False)
-              for aid, a in assets.items()}
+    # Un beat de imagen es o bien un still suelto (format con espacio de color
+    # de imagen fija) o bien un compuesto horneado, que ya es mp4 y se reconoce
+    # por el sufijo. Sirve para contar rachas.
+    def _es_img(a):
+        if (a.get("name") or "").endswith("_comp"):
+            return True
+        f = formatos.get(a.get("format"))
+        return f is not None and f.get("colorSpace") == "1-13-1"
+
+    es_img = {aid: _es_img(a) for aid, a in assets.items()}
 
     pos = Fraction(0)
     racha = peor = 0
@@ -109,12 +114,36 @@ def validar(ruta, max_img=MAX_IMG_SEGUIDAS):
 
     if seg(raiz.find(".//sequence").get("duration")) != pos:
         mal("la duracion de la secuencia no es la suma de los clips")
+
+    # Las transiciones se centran en el corte y no anaden tiempo: se comen el
+    # handle de los dos clips que tocan. Sin handle, Resolve no las monta.
+    transiciones = spine.findall("transition")
+    cortes = {}
+    acum = Fraction(0)
+    for i, c in enumerate(clips):
+        cortes[acum + seg(c.get("duration"))] = i
+        acum += seg(c.get("duration"))
+    for t in transiciones:
+        ini, dur = seg(t.get("offset")), seg(t.get("duration"))
+        centro = ini + dur / 2
+        if centro not in cortes:
+            mal("transicion que no cae en un corte: offset %s" % t.get("offset"))
+            continue
+        i = cortes[centro]
+        for clip, lado in ((clips[i], "salida"), (clips[i + 1], "entrada")):
+            a = assets[clip.get("ref")]
+            libre = (seg(a.get("duration")) - seg(clip.get("start")) - seg(clip.get("duration"))
+                     if lado == "salida" else seg(clip.get("start")))
+            if libre < dur / 2:
+                mal("sin handle de %s para la transicion en %s"
+                    % (lado, clip.get("name")))
     if peor > max_img:
         mal("racha de %d imagenes seguidas (hasta %s), el maximo es %d"
             % (peor, donde, max_img))
 
     return {"clips": len(clips), "assets": len(assets), "formats": len(formatos),
             "marcadores": len(spine.findall(".//marker")), "racha": peor,
+            "transiciones": len(spine.findall("transition")),
             "duracion": float(pos), "fallos": fallos}
 
 
@@ -128,9 +157,11 @@ def main():
         max_img = int(sys.argv[sys.argv.index("--max-img") + 1])
 
     r = validar(args[0], max_img)
-    print("%s  %d:%02d  %d clips, %d assets, %d formats, %d marcadores, racha %d"
+    print("%s  %d:%02d  %d clips, %d transiciones, %d assets, %d formats, "
+          "%d marcadores, racha %d"
           % (os.path.basename(args[0]), r["duracion"] // 60, r["duracion"] % 60,
-             r["clips"], r["assets"], r["formats"], r["marcadores"], r["racha"]))
+             r["clips"], r["transiciones"], r["assets"], r["formats"],
+             r["marcadores"], r["racha"]))
     if not r["fallos"]:
         print("OK")
         return 0
