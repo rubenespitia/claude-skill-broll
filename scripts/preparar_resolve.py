@@ -24,6 +24,11 @@ Como se reparte la duracion:
   4. Los clips se entrelazan para que **no haya mas de MAX_IMG_SEGUIDAS
      imagenes seguidas**. Eso reordena dentro de la seccion, no entre secciones.
 
+El timeline sale **sin transiciones** pero **con handles**: Resolve no respeta el
+tipo de transicion al importar, asi que se ponen alli, donde se aplican a todos
+los cortes de una vez. Los handles estan para que eso no de "insufficient
+handles".
+
 Tratamiento de las imagenes:
 
   Cada imagen fija se hornea con ffmpeg a compuestos/<nombre>_comp.mp4, un clip
@@ -89,7 +94,14 @@ FONDO_SATURACION = 0.75
 # mismo tiempo y se veria mas rapida.
 DERIVA_PX = 160
 
-TRANSICIONES = True
+# Emitir o no los <transition>. Va en False porque Resolve no respeta el tipo
+# al importar: monta Edge Wipe o Cross Dissolve y no hay forma de pedirle otra
+# cosa. Las transiciones se ponen en Resolve, que ahi si se aplican a todos los
+# cortes de una vez.
+TRANSICIONES = False
+# Se sigue usando aunque TRANSICIONES este en False: define el handle que se
+# reserva a cada lado del corte para que esas transiciones manuales tengan de
+# donde tirar. Sin handle, Resolve avisa de "insufficient handles".
 TRANSICION_S = 0.5
 # (tipo, preset) que se ciclan corte a corte.
 #
@@ -114,7 +126,7 @@ EXT_VIDEO = (".mp4", ".mov", ".mxf", ".mkv", ".avi")
 
 FPS_TL = TL_NUM / TL_DEN
 FRAMES_IMAGEN = int(round(DUR_IMAGEN * FPS_TL))
-FRAMES_TRANS = int(round(TRANSICION_S * FPS_TL)) if TRANSICIONES else 0
+FRAMES_TRANS = int(round(TRANSICION_S * FPS_TL))
 MEDIA_TRANS = FRAMES_TRANS // 2       # lo que la transicion come a cada lado
 # Handle que se reserva de verdad. El minimo teorico es MEDIA_TRANS, pero
 # dejarlo justo hace que Resolve avise de "insufficient handles": redondea la
@@ -553,7 +565,7 @@ def construir_fcpxml(manifest, avisar=None):
     elementos = []
     for i, c in enumerate(clips):
         elementos.append(c)
-        if FRAMES_TRANS and "--sin-transiciones" not in sys.argv and i + 1 < len(clips):
+        if TRANSICIONES and i + 1 < len(clips):
             corte = posiciones[i][0] + posiciones[i][1]
             # indexar por numero de corte, no por len(elementos): esa lista
             # crece con clips Y transiciones, y el ciclo saldria desordenado
@@ -570,7 +582,7 @@ def construir_fcpxml(manifest, avisar=None):
            '<fcpxml version="1.9">', "<resources>"]
     # un <effect> por uid referenciado; declararlos sueltos no rompe nada pero
     # ensucia el archivo
-    if FRAMES_TRANS:
+    if TRANSICIONES:
         for u, eid in efectos_id.items():
             nombre_ef = next(t for t, pr, ui in TRANSICION_CICLO
                              if pr is not None and (ui or EFECTO_UID) == u)
@@ -682,8 +694,7 @@ def main():
         return 0
 
     xml, st = construir_fcpxml(manifest, avisar=print)
-    nombre = ("B-ROLL-GUIA-SIN-TRANS.fcpxml" if "--sin-transiciones" in sys.argv
-              else "B-ROLL-GUIA.fcpxml")
+    nombre = "B-ROLL-GUIA.fcpxml"
     with open(os.path.join(AQUI, nombre), "w", encoding="utf-8") as f:
         f.write(xml)
     creados, reutilizados, copiados = arbol_por_seccion(manifest, st["entradas"])
