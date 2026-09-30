@@ -123,7 +123,17 @@ def validar(ruta, max_img=MAX_IMG_SEGUIDAS):
     for i, c in enumerate(clips):
         cortes[acum + seg(c.get("duration"))] = i
         acum += seg(c.get("duration"))
+    efectos = {e.get("id") for e in recursos.findall("effect")}
     for t in transiciones:
+        # un <transition> pelado, sin hijo <filter-video> apuntando a un
+        # <effect> declarado, entra en Resolve como Cross Dissolve sin avisar
+        fv = t.find("filter-video")
+        if fv is None:
+            mal("transicion sin <filter-video>: entrara como Cross Dissolve (%s)"
+                % t.get("name"))
+        elif fv.get("ref") not in efectos:
+            mal("la transicion %s apunta a un effect que no existe: %s"
+                % (t.get("name"), fv.get("ref")))
         ini, dur = seg(t.get("offset")), seg(t.get("duration"))
         centro = ini + dur / 2
         if centro not in cortes:

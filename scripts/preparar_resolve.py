@@ -90,10 +90,14 @@ DERIVA_PX = 160
 
 TRANSICIONES = True
 TRANSICION_S = 0.5
-# Nombres que se ciclan corte a corte. Resolve respeta el `name` del
-# <transition>; lo que no esta claro es que reconozca los nombres de preset con
-# direccion. Sondearlo con --sondeo antes de fiarse.
-TRANSICION_CICLO = ["Cross Dissolve"]
+# (tipo, preset) que se ciclan corte a corte. El tipo va en el `name` del
+# <transition> y el preset, que es donde vive la direccion, en el `name` del
+# <filter-video>. Los dos hacen falta: un <transition> pelado, sin hijo
+# <filter-video> ni recurso <effect>, cae a Cross Dissolve.
+# El uid es el que escribe Resolve al exportar; sirve para cualquier tipo.
+EFECTO_UID = "FxPlug:4731E73A-8DAC-4113-9A30-AE85B1761265"
+TRANSICION_CICLO = [("Slide", "Slide, Left-Right"),
+                    ("Slide", "Slide, Right-Left")]
 
 EXT_VIDEO = (".mp4", ".mov", ".mxf", ".mkv", ".avi")
 
@@ -441,6 +445,7 @@ def construir_fcpxml(manifest, avisar=None):
             formatos[clave] = (fid, gen(fid))
         return formatos[clave][0]
 
+    efecto_id = "e1"
     id_formato(("tl",),
                lambda f: '<format id="%s" name="FFVideoFormat1080p2398" '
                          'frameDuration="%d/%ds" width="%d" height="%d" '
@@ -532,14 +537,18 @@ def construir_fcpxml(manifest, avisar=None):
             corte = posiciones[i][0] + posiciones[i][1]
             # indexar por numero de corte, no por len(elementos): esa lista
             # crece con clips Y transiciones, y el ciclo saldria desordenado
-            nombre = TRANSICION_CICLO[i % len(TRANSICION_CICLO)]
+            tipo, preset = TRANSICION_CICLO[i % len(TRANSICION_CICLO)]
             elementos.append(
-                '<transition name="%s" offset="%s" duration="%s"/>'
-                % (attr(nombre), t_timeline(corte - MEDIA_TRANS),
-                   t_timeline(FRAMES_TRANS)))
+                '<transition name="%s" offset="%s" duration="%s">'
+                '<filter-video ref="%s" name="%s"/></transition>'
+                % (attr(tipo), t_timeline(corte - MEDIA_TRANS),
+                   t_timeline(FRAMES_TRANS), efecto_id, attr(preset)))
 
     xml = ['<?xml version="1.0" encoding="UTF-8"?>', "<!DOCTYPE fcpxml>",
            '<fcpxml version="1.9">', "<resources>"]
+    if FRAMES_TRANS:
+        xml.append('<effect id="%s" name="Cross Dissolve" uid="%s"/>'
+                   % (efecto_id, EFECTO_UID))
     xml += [x for _, x in formatos.values()]
     xml += assets
     xml.append("</resources>")
@@ -601,8 +610,11 @@ def main():
 
     if "--sondeo" in sys.argv:
         global TRANSICION_CICLO
-        TRANSICION_CICLO = ["Cross Dissolve", "Slide, Left-Right",
-                            "Slide, Right-Left", "Push, Left-Right", "Wipe"]
+        TRANSICION_CICLO = [("Cross Dissolve", "Cross Dissolve"),
+                            ("Slide", "Slide, Left-Right"),
+                            ("Slide", "Slide, Right-Left"),
+                            ("Push", "Push, Left-Right"),
+                            ("Push", "Push, Right-Left")]
         # solo imagenes: cada una es exactamente un clip, asi cada corte se
         # queda con un nombre distinto del ciclo y el sondeo es legible
         recursos = [r for s_ in manifest["secciones"] for r in s_["recursos"]
@@ -617,8 +629,8 @@ def main():
             f.write(xml)
         print("B-ROLL-SONDEO.fcpxml: %d clips, %d transiciones"
               % (st["clips"], st["transiciones"]))
-        for i, n in enumerate(TRANSICION_CICLO[:st["transiciones"]], 1):
-            print("  corte %d -> %s" % (i, n))
+        for i, (tipo, preset) in enumerate(TRANSICION_CICLO[:st["transiciones"]], 1):
+            print("  corte %d -> %s / %s" % (i, tipo, preset))
         return 0
 
     if "--prueba" in sys.argv:
