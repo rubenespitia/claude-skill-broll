@@ -1,6 +1,6 @@
 ---
 name: broll
-description: Recolecta B-roll para un guion de video, sea de videojuegos o de cine - imagenes de prensa con autor, precios de tienda o taquilla, trailers, posters, gameplay propio del canal, gameplay free use y stock gratuito. Organiza todo en carpetas y genera un TXT de creditos con autores, fechas y licencias. Usar cuando el usuario pida "broll", "b-roll", "material de apoyo", "recursos visuales", "imagenes y videos para el guion", o cuando haya un guion de review que necesite planos de apoyo.
+description: Recolecta B-roll para un guion de video, sea de videojuegos o de cine - imagenes de prensa con autor, precios de tienda o taquilla, trailers, posters, gameplay propio del canal, gameplay free use y stock gratuito. Organiza todo en carpetas, genera un TXT de creditos con autores, fechas y licencias, y opcionalmente lo deja montado en el editor - bins por seccion del guion y un timeline guia en FCPXML con marcadores, repartiendo la duracion segun el peso de cada seccion y sin dejar mas de dos imagenes fijas seguidas. Usar cuando el usuario pida "broll", "b-roll", "material de apoyo", "recursos visuales", "imagenes y videos para el guion", cuando haya un guion de review que necesite planos de apoyo, o cuando pida meter ese material en DaVinci Resolve, Premiere o un timeline.
 ---
 
 # B-roll para un guion
@@ -8,7 +8,7 @@ description: Recolecta B-roll para un guion de video, sea de videojuegos o de ci
 El guion manda. Cada recurso existe porque una frase concreta del guion lo pide, no porque el
 juego sea popular. Si una seccion no necesita apoyo visual, no se le busca nada.
 
-## Ciclo en tres fases
+## Ciclo en cuatro fases
 
 **Fase 1 - Leer y proponer.** Leer el guion, partirlo en secciones y listar que pide cada una.
 Buscar candidatos y escribir `candidatos.md` en la carpeta de la pieza. Nada se descarga aun.
@@ -17,6 +17,17 @@ Buscar candidatos y escribir `candidatos.md` en la carpeta de la pieza. Nada se 
 
 **Fase 3 - Descargar y acreditar.** Bajar solo lo marcado, nombrar por ID y escribir
 `CREDITOS.txt`. Reportar lo que fallo, no rellenarlo en silencio con otra cosa.
+
+**Fase 4 - Llevarlo al timeline.** Escribir `manifest.json` con el mapa guion→recurso, generar
+los bins por seccion y un timeline guia con un marcador por recurso. Detalle en
+`reference/timeline.md`. Solo si el usuario lo pide: bajar el material ya es una entrega
+completa.
+
+### Que version del guion
+
+Un documento puede tener varias: la que se narra, la del blog, la traducida. **Comprobar cual se
+lee antes de mapear nada.** Mapear contra la equivocada da frases que no coinciden con lo que
+suena, y el error no aparece hasta el montaje.
 
 ## Carpeta destino
 
@@ -34,7 +45,14 @@ Dentro de la carpeta de la pieza, que sigue la convencion del vault `content-cre
     gameplay-propio\
     gameplay-freeuse\
     stock\
+
+  manifest.json          fase 4: mapa guion->recurso
+  por-seccion\           fase 4: enlaces duros por seccion, para los bins
+  B-ROLL-GUIA.fcpxml     fase 4: timeline con marcadores
 ```
+
+Los tres ultimos solo existen si se llego a la fase 4. `por-seccion\` son **enlaces duros**: no
+duplican disco, y el arbol por tipo se queda como esta porque es el que describe `CREDITOS.txt`.
 
 `<CARPETA_VIDEO>` es la raiz donde vive el trabajo de video. En la maquina de origen es
 `C:\Users\<usuario>\Videos\1.-YOUTUBE`. Si no esta clara, preguntar una vez y no volver a
@@ -94,6 +112,10 @@ convertir lo que llegue en otro codec. Los comandos exactos estan en `reference/
 
 Un archivo que Resolve no abre es un archivo que no existe.
 
+Para la fase 4 importa **que edicion** de Resolve hay: la API de scripting es exclusiva de
+Studio, y en la gratuita ni siquiera existe el ajuste que la activa. Comprobacion en
+`reference/timeline.md`. La via de FCPXML funciona en las dos, asi que ante la duda se usa esa.
+
 ## Setup, una sola vez
 
 ```bash
@@ -122,7 +144,11 @@ Ambas son gratuitas: pexels.com/api y pixabay.com/api/docs.
 - `reference/fuentes.md` - de donde sale cada tipo, endpoints verificados y sus trampas
 - `reference/descarga.md` - comandos exactos de yt-dlp, ffmpeg y capturas de pagina
 - `reference/creditos.md` - formato del TXT y que exige cada licencia
+- `reference/timeline.md` - fase 4: manifest, reparto de duracion, ritmo y trampas de FCPXML
 - `assets/candidatos.plantilla.md` - tabla de la fase 1
 - `assets/CREDITOS.plantilla.txt` - esqueleto del TXT final
+- `assets/manifest.plantilla.json` - esqueleto del mapa guion->recurso de la fase 4
 - `scripts/ldjson.js` - saca titular, autor y fecha de un articulo de prensa
 - `scripts/capturar.js` - captura una pagina a 1920x1080 descartando el banner de cookies
+- `scripts/preparar_resolve.py` - genera los bins por seccion y el timeline guia
+- `scripts/validar_fcpxml.py` - revisa el fcpxml antes de abrirlo. Correrlo siempre

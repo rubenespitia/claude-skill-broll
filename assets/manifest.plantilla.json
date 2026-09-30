@@ -1,0 +1,38 @@
+{
+  "proyecto": "Titulo de la pieza",
+  "generado": "YYYY-MM-DD",
+  "guion": {
+    "fuente": "de donde sale el guion hablado, con el nombre exacto de la seccion",
+    "url": "https://...",
+    "palabras": 0,
+    "idioma": "español",
+    "medido": "YYYY-MM-DD"
+  },
+  "secciones": [
+    {
+      "n": "01",
+      "titulo": "Nombre de la seccion, sale como nombre del bin",
+      "beat": "HOOK",
+      "palabras": 0,
+      "recursos": [
+        {
+          "id": "B01",
+          "frase": "la linea del guion que se narra mientras esto esta en pantalla",
+          "credito": "Autor, medio (fecha) - o publisher si es material oficial",
+          "archivos": [
+            "imagenes/capturas-juego/B01_algo-01.jpg",
+            "imagenes/capturas-juego/B01_algo-02.jpg"
+          ]
+        },
+        {
+          "id": "B02",
+          "frase": "otra linea del guion",
+          "credito": "Publisher (via Steam)",
+          "archivos": [
+            "videos/trailers/B02_algo.mp4"
+          ]
+        }
+      ]
+    }
+  ]
+}

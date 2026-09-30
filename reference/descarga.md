@@ -131,10 +131,23 @@ El script solo pulsa opciones de **rechazar** o de **cerrar**, nunca "Accept". A
 en nombre de otro no es decision de un script. Si la pagina solo ofrece aceptar, informa
 `no habia, o ninguno era rechazable` y captura igual, con el banner puesto.
 
-Necesita el paquete resoluble desde el directorio donde se ejecuta:
+**[verificado 2026-09-30]** Dos cosas que hay que hacer bien o el script ni arranca:
 
 ```bash
 npm install playwright
+npx playwright install chromium-headless-shell
+```
+
+- `npx playwright install chromium` **no basta**. El script lanza headless y pide
+  `chromium_headless_shell`, que es un paquete aparte. El error lo dice, pero propone
+  `npx playwright install` a secas, que tarda mucho mas
+- **Node resuelve `require` junto al script, no junto al cwd.** `capturar.js` vive en la carpeta
+  de la skill, asi que instalar playwright en otro sitio y hacer `cd` ahi no sirve: hay que
+  exportar `NODE_PATH=<carpeta>/node_modules`
+
+```bash
+export NODE_PATH="$PWD/node_modules"
+node "$HOME/.claude/skills/broll/scripts/capturar.js" "URL" "B07_ign-analisis.png"
 ```
 
 **[verificado 2026-08-03]** En NPR, sin descartar el banner, el overlay atenua **la pagina
